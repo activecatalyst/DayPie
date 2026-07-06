@@ -71,7 +71,7 @@
     pointer-events:none;
   }
   body.ambient .block-label{ display:none; }
-  body.ambient .block-arc{ opacity:0; }
+  body.ambient .block-arc{ opacity:0; pointer-events:none; }
 
   .sunrise-bloom{
     fill:url(#bloomGrad);
@@ -204,15 +204,78 @@
   .focus-title{ color:var(--text-bright); font-size:16px; letter-spacing:.05em; margin-bottom:2px; text-transform:uppercase;}
   .focus-sub{ color:var(--text-dim); font-size:12px; margin-bottom:20px; }
   .focus-stage{ width:min(70vw, 70vh, 460px); height:min(70vw, 70vh, 460px); }
+
+  /* ---------- App wrap + drawer ---------- */
+  .appwrap{ display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .drawer{
+    display:flex; align-items:center; gap:8px;
+    font-size:11px; color:var(--text-dim); letter-spacing:.03em;
+    padding:7px 16px; border:1px solid var(--hairline); border-radius:20px;
+    cursor:default; max-width:92vw;
+  }
+  body.ambient .drawer{ display:none; }
+  .drawer-dot{ width:7px; height:7px; border-radius:50%; background:#3a3a40; flex:0 0 auto; }
+  .drawer-dot.bingo{ background:var(--orange); }
+
+  /* ---------- Plan / Week overlays ---------- */
+  .sheet-overlay{
+    position:fixed; inset:0; background:rgba(11,11,13,.96); z-index:95;
+    display:none; flex-direction:column; align-items:center;
+    padding:max(18px, env(safe-area-inset-top)) 16px 20px;
+    overflow-y:auto;
+  }
+  .sheet-overlay.open{ display:flex; }
+  .sheet-header{
+    width:100%; max-width:520px; display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:14px;
+  }
+  .sheet-title{ color:var(--text-bright); font-size:14px; letter-spacing:.06em; text-transform:uppercase; }
+  .sheet-stage{ width:min(72vw, 60vh, 420px); height:min(72vw, 60vh, 420px); flex:0 0 auto; }
+  .chip-tray{
+    display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+    margin-top:18px; max-width:520px;
+  }
+  .chip{
+    background:#17171a; border:1px solid var(--hairline); border-radius:20px;
+    padding:8px 14px; font-size:11px; color:var(--text-bright);
+    display:flex; align-items:center; gap:6px; cursor:grab; touch-action:none;
+  }
+  .chip .chip-dot{ width:8px; height:8px; border-radius:50%; }
+  .sheet-hint{ font-size:11px; color:var(--text-dim); margin-top:14px; text-align:center; max-width:420px; line-height:1.5; }
+  .drag-ghost{
+    position:fixed; z-index:200; pointer-events:none;
+    background:#17171a; border:1px solid var(--orange); border-radius:20px;
+    padding:7px 14px; font-size:11px; color:var(--text-bright);
+    transform:translate(-50%,-50%);
+  }
+
+  .week-grid{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(90px,1fr));
+    gap:14px; width:100%; max-width:640px; margin-top:6px;
+  }
+  .week-cell{ display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer; }
+  .week-cell svg{ width:84px; height:84px; }
+  .week-cell .week-label{ font-size:10px; color:var(--text-dim); letter-spacing:.03em; }
+  .week-cell.is-today .week-label{ color:var(--orange); }
+
+  .checkfield{ display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:var(--text-mid); }
+  .checkfield input{ width:15px; height:15px; }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button>
-  <button class="iconbtn" id="addBlockBtn" aria-label="Add block">＋</button>
+  <div style="display:flex; gap:2px;">
+    <button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button>
+    <button class="iconbtn" id="weekBtn" aria-label="Week view">▦</button>
+  </div>
+  <div style="display:flex; gap:2px;">
+    <button class="iconbtn" id="planBtn" aria-label="Plan tomorrow">☾</button>
+    <button class="iconbtn" id="addBlockBtn" aria-label="Add block">＋</button>
+  </div>
 </div>
 
+<div class="appwrap" id="appwrap">
 <div class="stage" id="stage">
   <svg id="disc" viewBox="0 0 400 400" role="img" aria-label="Day Pie disc">
     <defs>
@@ -235,12 +298,16 @@
           <feMergeNode in="SourceGraphic"/>
         </feMerge>
       </filter>
+      <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="5" stroke="#F26419" stroke-width="1.2" opacity=".55"/>
+      </pattern>
     </defs>
     <g id="ticksGroup"></g>
     <path id="goldenHourArc" class="sector-goldenhour" style="display:none"></path>
     <path id="remainingSector" class="sector-remaining"></path>
     <path id="winddownSector" class="sector-winddown" style="display:none"></path>
     <path id="elapsedSector" class="sector-elapsed"></path>
+    <g id="shadowGroup"></g>
     <g id="blocksGroup"></g>
     <line id="nowLine" class="now-line" x1="200" y1="200" x2="200" y2="20"/>
     <circle id="nowDot" class="now-dot" cx="200" cy="200" r="3.5"/>
@@ -253,6 +320,12 @@
     <div class="current-time" id="currentTime">--:--</div>
     <div class="next-up" id="nextUp">&nbsp;</div>
   </div>
+</div>
+
+<div class="drawer" id="dayCardDrawer">
+  <span class="drawer-dot" id="drawerDot"></span>
+  <span id="drawerText">Day Card —</span>
+</div>
 </div>
 
 <div class="modebar">
@@ -285,11 +358,21 @@
         <input type="number" step="0.0001" id="lonInput" placeholder="e.g. -74.0060">
       </div>
     </div>
+    <div class="field">
+      <label class="checkfield"><input type="checkbox" id="shadowToggle"> Meeting shadow — hatch the 15 min before every block</label>
+    </div>
     <div class="btnrow">
       <button class="primary" id="saveSettingsBtn">Save</button>
     </div>
     <div class="blocklist" id="settingsBlockList"></div>
-    <div class="hint">The disc shows only your waking day. Golden hour requires coordinates and network access to Open-Meteo (cached per day).</div>
+    <div class="btnrow">
+      <button class="ghost" id="loadExampleBtn">Load example day</button>
+      <button class="danger" id="clearBlocksBtn" style="flex:1;">Clear all blocks</button>
+    </div>
+    <div class="btnrow">
+      <button class="ghost" id="importAnchorBtn" style="flex:1;">Import Anchor Mode day</button>
+    </div>
+    <div class="hint">The disc shows only your waking day. Golden hour requires coordinates and network access to Open-Meteo (cached per day). Day Card status in the drawer requires Day Card to be hosted on the same origin as Day Pie.</div>
   </div>
 </div>
 
@@ -356,6 +439,33 @@
   <button class="modebtn" id="focusCloseBtn" style="margin-top:22px;">Back to Glance</button>
 </div>
 
+<!-- Plan a day overlay -->
+<div class="sheet-overlay" id="planOverlay">
+  <div class="sheet-header">
+    <div class="sheet-title" id="planTitle">Plan tomorrow</div>
+    <button class="iconbtn" id="planCloseBtn" aria-label="Close">&times;</button>
+  </div>
+  <svg class="sheet-stage" id="planSvg" viewBox="0 0 400 400" role="img" aria-label="Plan disc">
+    <circle cx="200" cy="200" r="190" fill="none" stroke="#2a2a2e" stroke-width="1"/>
+    <g id="planTicksGroup"></g>
+    <g id="planBlocksGroup"></g>
+  </svg>
+  <div class="chip-tray" id="chipTray"></div>
+  <div class="sheet-hint">Drag a chip onto the disc to place it there. Tap a placed block to edit or delete it. It goes live automatically at wake time.</div>
+</div>
+
+<!-- Week overlay -->
+<div class="sheet-overlay" id="weekOverlay">
+  <div class="sheet-header">
+    <div class="sheet-title">Week</div>
+    <button class="iconbtn" id="weekCloseBtn" aria-label="Close">&times;</button>
+  </div>
+  <div class="week-grid" id="weekGrid"></div>
+  <div class="sheet-hint">Structure vs. chaos, at a glance. Tap any day to plan or edit it.</div>
+</div>
+
+<div class="drag-ghost" id="dragGhost" style="display:none"></div>
+
 <script>
 (function(){
   "use strict";
@@ -366,14 +476,18 @@
   const TICK_R_IN=190, TICK_R_OUT=200;
 
   const STORE_KEYS = { settings:'daypie_settings', blocks:'daypie_blocks', sunset:'daypie_sunset', sunriseFlag:'daypie_sunrise_shown' };
+  // Day Card (sister PWA) shared localStorage schema — only readable if served from the same origin.
+  const DAYCARD_KEYS = { dayPrefix:'daycard_day_', stats:'daycard_stats_v1' };
+
+  const DEFAULT_SETTINGS = {wake:'07:00', sleep:'23:00', lat:null, lon:null, meetingShadow:false};
 
   // ---------- persistence ----------
   function loadSettings(){
     try{
       const raw = localStorage.getItem(STORE_KEYS.settings);
-      if(raw) return Object.assign({wake:'07:00', sleep:'23:00', lat:null, lon:null}, JSON.parse(raw));
+      if(raw) return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw));
     }catch(e){}
-    return {wake:'07:00', sleep:'23:00', lat:null, lon:null};
+    return Object.assign({}, DEFAULT_SETTINGS);
   }
   function saveSettings(s){ localStorage.setItem(STORE_KEYS.settings, JSON.stringify(s)); }
 
@@ -399,8 +513,22 @@
     return d.getHours()*60 + d.getMinutes() + d.getSeconds()/60;
   }
   function todayKey(){
+    return dateKeyOffset(0);
+  }
+  function dateKeyOffset(n){
     const d = new Date();
+    d.setDate(d.getDate()+n);
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  function weekdayOfDateKey(dateKey){
+    const [y,m,d] = dateKey.split('-').map(Number);
+    return new Date(y, m-1, d).getDay();
+  }
+  function shortDayLabel(dateKey){
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const [y,m,d] = dateKey.split('-').map(Number);
+    const dt = new Date(y, m-1, d);
+    return days[dt.getDay()]+' '+(m)+'/'+d;
   }
   function fmtHM(mins){
     mins = Math.max(0, Math.round(mins));
@@ -443,14 +571,17 @@
   }
 
   // ---------- block materialization ----------
-  function weekday(){ return new Date().getDay(); } // 0 Sun .. 6 Sat
-  function isActiveToday(b){
+  function isActiveOnDate(b, dateKey){
     if(b.repeat === 'daily') return true;
-    if(b.repeat === 'weekdays'){ const w = weekday(); return w>=1 && w<=5; }
-    return b.date === todayKey();
+    if(b.repeat === 'weekdays'){ const w = weekdayOfDateKey(dateKey); return w>=1 && w<=5; }
+    return b.date === dateKey;
+  }
+  function isActiveToday(b){ return isActiveOnDate(b, todayKey()); }
+  function blocksForDate(dateKey){
+    return blocks.filter(b=>isActiveOnDate(b, dateKey)).slice().sort((a,b)=>toMinutes(a.start)-toMinutes(b.start));
   }
   function todaysBlocks(){
-    return blocks.filter(isActiveToday).slice().sort((a,b)=>toMinutes(a.start)-toMinutes(b.start));
+    return blocksForDate(todayKey());
   }
 
   // ---------- ticks (drawn once per settings change) ----------
@@ -551,8 +682,12 @@
       document.getElementById('nowDot').setAttribute('cy', p.y);
     }
 
-    // blocks
+    // blocks + meeting shadow
+    renderMeetingShadows(wake, sleep, total);
     renderBlocks(wake, sleep, total, now);
+
+    // Day Card drawer
+    updateDrawer();
 
     // readouts
     let committedRemaining = 0;
@@ -581,6 +716,27 @@
       sunriseShownDate = todayKey();
       localStorage.setItem(STORE_KEYS.sunriseFlag, sunriseShownDate);
     }
+  }
+
+  function renderMeetingShadows(wake, sleep, total){
+    const g = document.getElementById('shadowGroup');
+    g.innerHTML = '';
+    if(!settings.meetingShadow) return;
+    const tb = todaysBlocks();
+    tb.forEach((b, i)=>{
+      const bs = toMinutes(b.start);
+      const prevEnd = i>0 ? toMinutes(tb[i-1].end) : -Infinity;
+      const shadowStart = Math.max(wake, bs-15, prevEnd);
+      if(shadowStart >= bs) return;
+      const f0 = Math.max(0, Math.min(1, (shadowStart-wake)/total));
+      const f1 = Math.max(0, Math.min(1, (bs-wake)/total));
+      if(f1 <= f0) return;
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d', bandPath(f0, f1, BLOCK_R_INNER, BLOCK_R_OUTER));
+      path.setAttribute('fill', 'url(#hatch)');
+      path.setAttribute('pointer-events', 'none');
+      g.appendChild(path);
+    });
   }
 
   function renderBlocks(wake, sleep, total, now){
@@ -626,6 +782,7 @@
     document.getElementById('sleepInput').value = settings.sleep;
     document.getElementById('latInput').value = settings.lat || '';
     document.getElementById('lonInput').value = settings.lon || '';
+    document.getElementById('shadowToggle').checked = !!settings.meetingShadow;
     renderSettingsBlockList();
     settingsModal.classList.add('open');
   });
@@ -649,6 +806,7 @@
     const lon = parseFloat(document.getElementById('lonInput').value);
     settings.lat = isNaN(lat) ? null : lat;
     settings.lon = isNaN(lon) ? null : lon;
+    settings.meetingShadow = document.getElementById('shadowToggle').checked;
     saveSettings(settings);
     drawTicks();
     updateGoldenHour();
@@ -656,17 +814,152 @@
     settingsModal.classList.remove('open');
   });
 
+  // ---------- example day (for trying out the disc with realistic blocks) ----------
+  const EXAMPLE_TEMPLATE = [
+    { offset:30,  dur:30,  label:'Morning routine',   category:'life' },
+    { offset:120, dur:180, label:'Deep work',         category:'work' },
+    { offset:300, dur:60,  label:'Lunch',             category:'life' },
+    { offset:360, dur:120, label:'Meetings',          category:'work' },
+    { offset:630, dur:60,  label:'Training',          category:'training' },
+    { offset:720, dur:60,  label:'Dinner',            category:'life' },
+    { offset:870, dur:60,  label:'Wind down / reading', category:'rest' }
+  ];
+  function loadExampleDay(){
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep);
+    const total = sleep - wake;
+    const today = todayKey();
+    let added = 0;
+    EXAMPLE_TEMPLATE.forEach(t=>{
+      if(t.offset + t.dur > total) return; // skip anything that wouldn't fit this waking day
+      const startMin = wake + t.offset, endMin = startMin + t.dur;
+      const start = String(Math.floor(startMin/60)%24).padStart(2,'0')+':'+String(startMin%60).padStart(2,'0');
+      const end = String(Math.floor(endMin/60)%24).padStart(2,'0')+':'+String(endMin%60).padStart(2,'0');
+      blocks.push({
+        id:'b'+Date.now()+Math.random().toString(36).slice(2,7)+(added++),
+        label:t.label, start, end, category:t.category, repeat:'none', date: today
+      });
+    });
+    saveBlocks(blocks);
+    renderSettingsBlockList();
+    render();
+  }
+  document.getElementById('loadExampleBtn').addEventListener('click', loadExampleDay);
+  document.getElementById('clearBlocksBtn').addEventListener('click', ()=>{
+    if(!confirm('Clear every block, including repeating ones? This can\'t be undone.')) return;
+    blocks = [];
+    saveBlocks(blocks);
+    renderSettingsBlockList();
+    render();
+  });
+
+  // ---------- Anchor Mode tie-in (activecatalyst.github.io/anchor-mode) ----------
+  // Sister PWA, same-origin localStorage read only — mirrors its public TEMPLATES data
+  // (id/time/tag/title) since that data lives in Anchor Mode's own script, not in storage.
+  const ANCHOR_KEY = 'anchor_mode_v2';
+  const ANCHOR_TEMPLATES = {
+    standard: { items: [
+      {id:'s-morning', time:'7:00 – 7:30 AM',  tag:'Anchor',  title:'Morning ritual'},
+      {id:'s-gym',     time:'7:30 – 9:30 AM',  tag:'Anchor',  title:'Gym'},
+      {id:'s-setup',   time:'9:30 – 10:00 AM', tag:'Anchor',  title:'Day setup'},
+      {id:'s-deep',    time:'10:00 AM – 12:30 PM', tag:'Primary', title:'Deep work — applications'},
+      {id:'s-lunch',   time:'12:30 – 2:00 PM', tag:'Reset',   title:'Lunch + real break'},
+      {id:'s-network', time:'2:00 – 3:00 PM',  tag:'Primary', title:'Networking + admin'},
+      {id:'s-skill',   time:'3:00 – 5:00 PM',  tag:'Build',   title:'Skill + identity block'},
+      {id:'s-shut',    time:'5:00 – 5:30 PM',  tag:'Reset',   title:'Shutdown ritual'}
+    ]},
+    minimal: { items: [
+      {id:'m-morning', time:'8:30 – 9:00 AM',  tag:'Anchor',  title:'Slow morning'},
+      {id:'m-win',     time:'9:00 – 9:30 AM',  tag:'Primary', title:'One small win'},
+      {id:'m-gym',     time:'9:30 – 11:30 AM', tag:'Anchor',  title:'Gym'},
+      {id:'m-lunch',   time:'12:00 – 1:00 PM', tag:'Reset',   title:'Lunch'},
+      {id:'m-app',     time:'1:00 – 3:00 PM',  tag:'Primary', title:'1 application'},
+      {id:'m-gen',     time:'3:00 – 4:00 PM',  tag:'Build',   title:'Something generative'},
+      {id:'m-shut',    time:'4:00 – 4:30 PM',  tag:'Reset',   title:'Hard stop'}
+    ]},
+    highperf: { items: [
+      {id:'h-morning', time:'6:00 – 6:30 AM',  tag:'Anchor',  title:'Morning protocol'},
+      {id:'h-gym',     time:'6:30 – 8:30 AM',  tag:'Anchor',  title:'Gym'},
+      {id:'h-setup',   time:'8:30 – 9:00 AM',  tag:'Anchor',  title:'Day setup'},
+      {id:'h-deep',    time:'9:00 – 11:30 AM', tag:'Primary', title:'Deep work — applications'},
+      {id:'h-network', time:'11:30 AM – 12:30 PM', tag:'Primary', title:'Networking sprint'},
+      {id:'h-lunch',   time:'12:30 – 2:00 PM', tag:'Reset',   title:'Real lunch break'},
+      {id:'h-skill',   time:'2:00 – 4:00 PM',  tag:'Build',   title:'Skill building'},
+      {id:'h-admin',   time:'4:00 – 5:00 PM',  tag:'Primary', title:'Admin + tracker'},
+      {id:'h-shut',    time:'5:00 – 5:30 PM',  tag:'Reset',   title:'Shutdown ritual'}
+    ]}
+  };
+  function parseAnchorTimeRange(str){
+    const parts = String(str).split(/[–-]/).map(s=>s.trim());
+    if(parts.length!==2) return null;
+    function parsePart(s){
+      const m = s.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      if(!m) return null;
+      return { h:parseInt(m[1],10), m:parseInt(m[2],10), mer: m[3] ? m[3].toUpperCase() : null };
+    }
+    let a = parsePart(parts[0]), b = parsePart(parts[1]);
+    if(!a || !b) return null;
+    if(!a.mer && b.mer) a.mer = b.mer;
+    if(!b.mer && a.mer) b.mer = a.mer;
+    if(!a.mer) a.mer = 'AM';
+    if(!b.mer) b.mer = 'AM';
+    function to24(t){ let h=t.h%12; if(t.mer==='PM') h+=12; return h*60+t.m; }
+    return { startMin: to24(a), endMin: to24(b) };
+  }
+  function anchorCategoryFor(item){
+    if(/gym/i.test(item.title)) return 'training';
+    if(item.tag === 'Reset') return 'rest';
+    if(item.tag === 'Build') return 'life';
+    if(item.tag === 'Primary') return 'work';
+    return 'life'; // Anchor items that aren't the gym (morning ritual, day setup)
+  }
+  function importAnchorMode(){
+    let raw;
+    try{ raw = localStorage.getItem(ANCHOR_KEY); }catch(e){ raw = null; }
+    if(!raw){ alert("No Anchor Mode schedule found on this device. It needs to be hosted on the same origin as Day Pie for this to work."); return; }
+    let state;
+    try{ state = JSON.parse(raw); }catch(e){ alert('Could not read Anchor Mode data.'); return; }
+    if(state.date !== todayKey()){ alert("Anchor Mode doesn't have a schedule started for today."); return; }
+    const tmpl = ANCHOR_TEMPLATES[state.template];
+    if(!tmpl){ alert('Unrecognized Anchor Mode template.'); return; }
+    const order = (state.order && state.order.length) ? state.order : tmpl.items.map(i=>i.id);
+    // remove any blocks from a previous import today so re-importing replaces, not duplicates
+    blocks = blocks.filter(b=> !(b.source==='anchor' && b.date===todayKey()));
+    let added = 0;
+    order.forEach(id=>{
+      const item = tmpl.items.find(i=>i.id===id);
+      if(!item) return;
+      const timeStr = (state.customTimes && state.customTimes[id]) || item.time;
+      const parsed = parseAnchorTimeRange(timeStr);
+      if(!parsed || parsed.endMin <= parsed.startMin) return;
+      const start = String(Math.floor(parsed.startMin/60)).padStart(2,'0')+':'+String(parsed.startMin%60).padStart(2,'0');
+      const end = String(Math.floor(parsed.endMin/60)).padStart(2,'0')+':'+String(parsed.endMin%60).padStart(2,'0');
+      blocks.push({
+        id:'anchor-'+id+'-'+todayKey(), label:item.title, start, end,
+        category: anchorCategoryFor(item), repeat:'none', date: todayKey(), source:'anchor'
+      });
+      added++;
+    });
+    saveBlocks(blocks);
+    renderSettingsBlockList();
+    render();
+    alert(added ? `Imported ${added} block${added===1?'':'s'} from Anchor Mode.` : 'Nothing to import.');
+  }
+  document.getElementById('importAnchorBtn').addEventListener('click', importAnchorMode);
+
   // ---------- modals: block edit ----------
   const blockModal = document.getElementById('blockModal');
   let editingBlockId = null;
-  function openBlockModal(existing){
+  let pendingDate = null; // set when creating a block for a specific (non-today) date, e.g. from Plan/Week
+  function openBlockModal(existing, preset){
     editingBlockId = existing ? existing.id : null;
-    document.getElementById('blockModalTitle').textContent = existing ? 'Edit Block' : 'New Block';
-    document.getElementById('blockLabel').value = existing ? existing.label : '';
-    document.getElementById('blockStart').value = existing ? existing.start : roundedNow();
-    document.getElementById('blockEnd').value = existing ? existing.end : addMinutes(roundedNow(), 60);
+    pendingDate = (preset && preset.date) || null;
+    document.getElementById('blockModalTitle').textContent = existing ? 'Edit Block' : (pendingDate ? 'New Block · '+shortDayLabel(pendingDate) : 'New Block');
+    document.getElementById('blockLabel').value = existing ? existing.label : ((preset && preset.label) || '');
+    document.getElementById('blockStart').value = existing ? existing.start : ((preset && preset.start) || roundedNow());
+    const defaultStart = existing ? existing.start : ((preset && preset.start) || roundedNow());
+    document.getElementById('blockEnd').value = existing ? existing.end : ((preset && preset.end) || addMinutes(defaultStart, 60));
     document.getElementById('blockRepeat').value = existing ? existing.repeat : 'none';
-    const cat = existing ? existing.category : 'work';
+    const cat = existing ? existing.category : ((preset && preset.category) || 'work');
     document.querySelectorAll('#categoryPick input').forEach(r=> r.checked = (r.value === cat));
     document.getElementById('deleteBlockBtn').style.display = existing ? 'block' : 'none';
     blockModal.classList.add('open');
@@ -691,22 +984,29 @@
     if(!start || !end || toMinutes(end) <= toMinutes(start)){ alert('End must be after start.'); return; }
     const category = document.querySelector('#categoryPick input:checked').value;
     const repeat = document.getElementById('blockRepeat').value;
+    const targetDate = pendingDate || todayKey();
     if(editingBlockId){
       const b = blocks.find(x=>x.id===editingBlockId);
-      Object.assign(b, {label, start, end, category, repeat, date: repeat==='none' ? todayKey() : b.date});
+      Object.assign(b, {label, start, end, category, repeat, date: repeat==='none' ? (b.date || targetDate) : b.date});
     } else {
-      blocks.push({ id: 'b'+Date.now()+Math.random().toString(36).slice(2,7), label, start, end, category, repeat, date: todayKey() });
+      blocks.push({ id: 'b'+Date.now()+Math.random().toString(36).slice(2,7), label, start, end, category, repeat, date: targetDate });
     }
     saveBlocks(blocks);
     blockModal.classList.remove('open');
-    render();
+    afterBlockChange();
   });
   document.getElementById('deleteBlockBtn').addEventListener('click', ()=>{
     blocks = blocks.filter(b=>b.id!==editingBlockId);
     saveBlocks(blocks);
     blockModal.classList.remove('open');
-    render();
+    afterBlockChange();
   });
+  function afterBlockChange(){
+    render();
+    if(planOverlay.classList.contains('open')) renderPlanBlocks();
+    if(weekOverlay.classList.contains('open')) renderWeek();
+    pendingDate = null;
+  }
 
   document.querySelectorAll('[data-close]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -729,6 +1029,12 @@
     btn.addEventListener('click', ()=> setMode(btn.dataset.mode));
   });
   setMode('glance');
+
+  // Ambient traps the UI on purpose (topbar/modebar are hidden there) — tapping
+  // anywhere on the stage is the only way out, so make sure that always works.
+  document.getElementById('stage').addEventListener('click', ()=>{
+    if(document.body.classList.contains('ambient')) setMode('glance');
+  });
 
   // ---------- focus mode ----------
   const focusOverlay = document.getElementById('focusOverlay');
@@ -764,6 +1070,201 @@
   ['pointerup','pointerleave','pointercancel'].forEach(ev=>{
     document.getElementById('blocksGroup').addEventListener(ev, ()=>{ clearTimeout(pressTimer); });
   });
+
+  // ---------- Plan a day (drag blocks onto an empty disc) ----------
+  const planOverlay = document.getElementById('planOverlay');
+  const planSvg = document.getElementById('planSvg');
+  let planTargetDate = null;
+
+  function drawTicksInto(groupId, wake, sleep){
+    const total = sleep - wake;
+    const g = document.getElementById(groupId);
+    g.innerHTML = '';
+    const hours = Math.floor(total/60);
+    for(let i=0;i<=hours;i++){
+      const frac = (i*60)/total;
+      if(frac>1) continue;
+      const isMajor = i % 3 === 0;
+      const p1 = pointFor(frac, TICK_R_IN);
+      const p2 = pointFor(frac, isMajor ? TICK_R_OUT+4 : TICK_R_OUT);
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+      line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+      line.setAttribute('class', 'tick' + (isMajor ? ' major':''));
+      g.appendChild(line);
+    }
+  }
+
+  function openPlanForDate(dateKey){
+    planTargetDate = dateKey;
+    const isTomorrow = dateKey === dateKeyOffset(1);
+    document.getElementById('planTitle').textContent = isTomorrow ? 'Plan tomorrow' : ('Plan · '+shortDayLabel(dateKey));
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep);
+    drawTicksInto('planTicksGroup', wake, sleep);
+    renderChipTray();
+    renderPlanBlocks();
+    planOverlay.classList.add('open');
+  }
+  function renderPlanBlocks(){
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep), total = sleep-wake;
+    const g = document.getElementById('planBlocksGroup');
+    g.innerHTML = '';
+    blocksForDate(planTargetDate).forEach(b=>{
+      const bs = toMinutes(b.start), be = toMinutes(b.end);
+      const f0 = Math.max(0, Math.min(1, (bs-wake)/total));
+      const f1 = Math.max(0, Math.min(1, (be-wake)/total));
+      if(f1 <= f0) return;
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d', bandPath(f0, f1, BLOCK_R_INNER, BLOCK_R_OUTER));
+      path.setAttribute('fill', CATEGORY_COLORS[b.category] || CATEGORY_COLORS.life);
+      path.setAttribute('fill-opacity', '0.6');
+      path.style.cursor = 'pointer';
+      path.addEventListener('click', ()=> openBlockModal(b, {date: planTargetDate}));
+      g.appendChild(path);
+
+      const midF = (f0+f1)/2;
+      const lp = pointFor(midF, (BLOCK_R_INNER+BLOCK_R_OUTER)/2 + 14);
+      const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('x', lp.x); label.setAttribute('y', lp.y);
+      label.setAttribute('text-anchor','middle');
+      label.setAttribute('class','block-label');
+      label.textContent = b.label;
+      g.appendChild(label);
+    });
+  }
+
+  function recentChipLabels(){
+    const defaults = [
+      {label:'Work block', category:'work'},
+      {label:'Training', category:'training'},
+      {label:'Life', category:'life'},
+      {label:'Rest', category:'rest'}
+    ];
+    const seen = new Set(defaults.map(d=>d.label.toLowerCase()));
+    const recent = blocks
+      .slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''))
+      .filter(b=>{ const k=b.label.toLowerCase(); if(seen.has(k)) return false; seen.add(k); return true; })
+      .slice(0,4)
+      .map(b=>({label:b.label, category:b.category}));
+    return defaults.concat(recent);
+  }
+
+  function renderChipTray(){
+    const tray = document.getElementById('chipTray');
+    tray.innerHTML = '';
+    recentChipLabels().forEach(item=>{
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.innerHTML = `<span class="chip-dot" style="background:${CATEGORY_COLORS[item.category]||CATEGORY_COLORS.life}"></span>${item.label}`;
+      initChipDrag(chip, item.label, item.category);
+      tray.appendChild(chip);
+    });
+  }
+
+  function initChipDrag(chip, label, category){
+    chip.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      const ghost = document.getElementById('dragGhost');
+      ghost.innerHTML = `<span class="chip-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${CATEGORY_COLORS[category]||CATEGORY_COLORS.life};margin-right:6px;"></span>${label}`;
+      ghost.style.left = e.clientX+'px';
+      ghost.style.top = e.clientY+'px';
+      ghost.style.display = 'block';
+
+      function move(ev){
+        ghost.style.left = ev.clientX+'px';
+        ghost.style.top = ev.clientY+'px';
+      }
+      function up(ev){
+        document.removeEventListener('pointermove', move);
+        ghost.style.display = 'none';
+        const rect = planSvg.getBoundingClientRect();
+        if(ev.clientX>=rect.left && ev.clientX<=rect.right && ev.clientY>=rect.top && ev.clientY<=rect.bottom){
+          const cx = rect.left+rect.width/2, cy = rect.top+rect.height/2;
+          const dx = ev.clientX-cx, dy = ev.clientY-cy;
+          let angle = Math.atan2(dy,dx)*180/Math.PI;
+          let frac = (angle+90)/360;
+          frac = ((frac % 1)+1)%1;
+          const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep), total = sleep-wake;
+          let startMin = wake + frac*total;
+          startMin = Math.round(startMin/15)*15;
+          if(startMin >= sleep) startMin = sleep-60;
+          const startHHMM = String(Math.floor(startMin/60)%24).padStart(2,'0')+':'+String(((startMin%60)+60)%60).padStart(2,'0');
+          openBlockModal(null, { label, category, start:startHHMM, end:addMinutes(startHHMM,60), date: planTargetDate });
+        }
+      }
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up, {once:true});
+    });
+  }
+
+  document.getElementById('planBtn').addEventListener('click', ()=> openPlanForDate(dateKeyOffset(1)));
+  document.getElementById('planCloseBtn').addEventListener('click', ()=> planOverlay.classList.remove('open'));
+
+  // ---------- Week view ----------
+  const weekOverlay = document.getElementById('weekOverlay');
+  function miniDiscSVG(dateKey, isToday){
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep), total = sleep-wake;
+    const now = nowMinutes();
+    const fracNow = isToday ? Math.min(1, Math.max(0, (now-wake)/total)) : 0;
+    let inner = `<circle cx="200" cy="200" r="190" fill="#17171a"/>`;
+    if(isToday && fracNow>0){
+      inner += `<path d="${pieSlicePath(0, fracNow, 190)}" fill="#0f0f11"/>`;
+    }
+    blocksForDate(dateKey).forEach(b=>{
+      const bs = toMinutes(b.start), be = toMinutes(b.end);
+      const f0 = Math.max(0, Math.min(1, (bs-wake)/total));
+      const f1 = Math.max(0, Math.min(1, (be-wake)/total));
+      if(f1<=f0) return;
+      const color = CATEGORY_COLORS[b.category] || CATEGORY_COLORS.life;
+      inner += `<path d="${bandPath(f0,f1,150,190)}" fill="${color}" fill-opacity="0.65"/>`;
+    });
+    if(isToday){
+      const p = pointFor(fracNow, 190);
+      inner += `<line x1="200" y1="200" x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}" stroke="#F26419" stroke-width="4"/>`;
+    }
+    return `<svg viewBox="0 0 400 400">${inner}</svg>`;
+  }
+  function renderWeek(){
+    const grid = document.getElementById('weekGrid');
+    grid.innerHTML = '';
+    for(let i=0;i<7;i++){
+      const dateKey = dateKeyOffset(i);
+      const isToday = i===0;
+      const cell = document.createElement('div');
+      cell.className = 'week-cell' + (isToday ? ' is-today' : '');
+      cell.innerHTML = miniDiscSVG(dateKey, isToday) + `<div class="week-label">${isToday ? 'Today' : shortDayLabel(dateKey)}</div>`;
+      cell.addEventListener('click', ()=>{ weekOverlay.classList.remove('open'); openPlanForDate(dateKey); });
+      grid.appendChild(cell);
+    }
+  }
+  document.getElementById('weekBtn').addEventListener('click', ()=>{ renderWeek(); weekOverlay.classList.add('open'); });
+  document.getElementById('weekCloseBtn').addEventListener('click', ()=> weekOverlay.classList.remove('open'));
+
+  // ---------- Day Card drawer (reads sister PWA's localStorage, same-origin only) ----------
+  function updateDrawer(){
+    const dot = document.getElementById('drawerDot');
+    const text = document.getElementById('drawerText');
+    try{
+      const dayRaw = localStorage.getItem(DAYCARD_KEYS.dayPrefix + todayKey());
+      const statsRaw = localStorage.getItem(DAYCARD_KEYS.stats);
+      if(!dayRaw){
+        dot.classList.remove('bingo');
+        text.textContent = 'Day Card: not found on this device';
+        return;
+      }
+      const day = JSON.parse(dayRaw);
+      const stats = statsRaw ? JSON.parse(statsRaw) : null;
+      const marked = Array.isArray(day.marked) ? day.marked.filter(Boolean).length : 0;
+      const streak = stats ? stats.currentStreak : 0;
+      dot.classList.toggle('bingo', !!day.dayWon);
+      let msg = `Day Card: ${marked}/25 · ${day.dayWon ? 'bingo won' : 'no bingo yet'} · streak ${streak}`;
+      if(day.dayWon && day.reward && day.rewardUnlocked){ msg += ` · unlocked: ${day.reward}`; }
+      text.textContent = msg;
+    }catch(e){
+      dot.classList.remove('bingo');
+      text.textContent = 'Day Card: not found on this device';
+    }
+  }
 
   // ---------- boot ----------
   function boot(){
