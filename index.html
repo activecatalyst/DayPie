@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Day Pie</title>
+<meta name="description" content="A time-blindness clock: your waking day as a live disc.">
+<meta name="theme-color" content="#0B0B0D">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{
+    --bg:#0B0B0D;
+    --charcoal:#17171a;
+    --charcoal-2:#1f1f23;
+    --hairline:#2a2a2e;
+    --orange:#F26419;
+    --ember:#9E2B25;
+    --slate:#7C8591;
+    --deepblue:#1F2A44;
+    --text-dim:#54545c;
+    --text-mid:#8a8a92;
+    --text-bright:#e7e7ea;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%; margin:0; background:var(--bg); overscroll-behavior:none;}
+  body{
+    font-family: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Roboto Mono", monospace;
+    color:var(--text-mid);
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; min-height:100dvh;
+    user-select:none;
+  }
+  .stage{
+    position:relative;
+    width:min(94vw, 94vh, 900px);
+    height:min(94vw, 94vh, 900px);
+    display:flex; align-items:center; justify-content:center;
+    transition: opacity .6s ease;
+  }
+  body.ambient .stage{ opacity:.8; }
+
+  svg#disc{ width:100%; height:100%; display:block; overflow:visible; }
+
+  .tick{ stroke:var(--hairline); stroke-width:1; }
+  .tick.major{ stroke:#3a3a40; }
+
+  .sector-elapsed{ fill:var(--charcoal); }
+  .sector-remaining{ fill:url(#remainGrad); }
+  .sector-winddown{ fill:url(#winddownGrad); }
+  .sector-goldenhour{ fill:#5a4326; opacity:.35; }
+
+  .now-line{
+    stroke:var(--orange);
+    stroke-width:2.25;
+    filter:url(#nowGlow);
+    stroke-linecap:round;
+  }
+  .now-dot{ fill:var(--orange); filter:url(#nowGlow); }
+
+  .block-arc{ cursor:pointer; transition: opacity .3s ease, filter .3s ease; }
+  .block-arc:hover, .block-arc:active{ filter:brightness(1.3); }
+  .block-arc.elapsed{ opacity:.28; fill:none !important; stroke-width:1; }
+  .block-label{
+    fill:var(--text-mid);
+    font-size:11px;
+    letter-spacing:.03em;
+    pointer-events:none;
+  }
+  body.ambient .block-label{ display:none; }
+  body.ambient .block-arc{ opacity:0; }
+
+  .sunrise-bloom{
+    fill:url(#bloomGrad);
+    opacity:0;
+    pointer-events:none;
+  }
+  .sunrise-bloom.play{ animation: bloom 3.2s ease-out 1; }
+  @keyframes bloom{
+    0%{ opacity:0; }
+    15%{ opacity:.9; }
+    100%{ opacity:0; }
+  }
+
+  .readouts{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    pointer-events:none;
+    text-align:center;
+  }
+  .remaining-hours{
+    font-size:clamp(48px, 12vw, 92px);
+    font-weight:600;
+    color:var(--orange);
+    line-height:1;
+    letter-spacing:-0.02em;
+  }
+  .remaining-label{
+    font-size:11px;
+    color:var(--text-dim);
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    margin-top:6px;
+  }
+  .current-time{
+    font-size:13px;
+    color:var(--text-mid);
+    margin-top:18px;
+    letter-spacing:.04em;
+  }
+  .next-up{
+    font-size:12px;
+    color:var(--text-dim);
+    margin-top:6px;
+    letter-spacing:.02em;
+  }
+  body.ambient .current-time,
+  body.ambient .next-up,
+  body.ambient .remaining-label{ display:none; }
+
+  .topbar{
+    position:fixed; top:max(14px, env(safe-area-inset-top)); left:0; right:0;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:0 18px;
+    z-index:10;
+  }
+  body.ambient .topbar{ opacity:0; pointer-events:none; }
+  .iconbtn{
+    background:none; border:none; color:var(--text-dim);
+    font-family:inherit; font-size:18px; padding:10px; cursor:pointer;
+    border-radius:8px;
+  }
+  .iconbtn:active{ background:rgba(255,255,255,.06); }
+  .modebar{
+    position:fixed; bottom:max(18px, env(safe-area-inset-bottom)); left:0; right:0;
+    display:flex; justify-content:center; gap:8px; z-index:10;
+  }
+  body.ambient .modebar{ opacity:0; pointer-events:none; }
+  .modebtn{
+    background:none; border:1px solid var(--hairline); color:var(--text-dim);
+    font-family:inherit; font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    padding:7px 14px; border-radius:20px; cursor:pointer;
+  }
+  .modebtn.active{ color:var(--orange); border-color:var(--ember); }
+
+  /* Ambient tap-to-exit */
+  body.ambient{ cursor:none; }
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.75);
+    display:none; align-items:center; justify-content:center; z-index:100;
+    padding:20px;
+  }
+  .modal-backdrop.open{ display:flex; }
+  .modal{
+    background:#111114; border:1px solid var(--hairline); border-radius:14px;
+    width:min(420px, 100%); max-height:86vh; overflow-y:auto;
+    padding:22px; color:var(--text-mid);
+  }
+  .modal h2{
+    color:var(--text-bright); font-size:14px; letter-spacing:.06em;
+    text-transform:uppercase; margin:0 0 16px; font-weight:600;
+  }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:11px; color:var(--text-dim); margin-bottom:6px; letter-spacing:.04em; }
+  .field input[type=time], .field input[type=text], .field input[type=number], .field select{
+    width:100%; background:#1a1a1e; border:1px solid var(--hairline); color:var(--text-bright);
+    font-family:inherit; font-size:14px; padding:9px 10px; border-radius:8px;
+  }
+  .row2{ display:flex; gap:10px; }
+  .row2 > .field{ flex:1; }
+  .colorpick{ display:flex; gap:8px; margin-top:4px; }
+  .colorpick label{ display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer; }
+  .colorpick input{ display:none; }
+  .swatch{ width:18px; height:18px; border-radius:50%; border:2px solid transparent; }
+  .colorpick input:checked + .swatch{ border-color:var(--text-bright); }
+  .btnrow{ display:flex; gap:10px; margin-top:18px; }
+  button.primary, button.ghost, button.danger{
+    font-family:inherit; font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+    padding:10px 14px; border-radius:8px; cursor:pointer; flex:1;
+  }
+  button.primary{ background:var(--orange); border:none; color:#0B0B0D; font-weight:700; }
+  button.ghost{ background:none; border:1px solid var(--hairline); color:var(--text-mid); }
+  button.danger{ background:none; border:1px solid #5a2a2a; color:#c96b6b; flex:0 0 auto; }
+  .blocklist{ margin-top:8px; border-top:1px solid var(--hairline); padding-top:12px; }
+  .blockitem{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 0; border-bottom:1px solid #1c1c20; font-size:12px; cursor:pointer;
+  }
+  .blockitem .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:8px; }
+  .hint{ font-size:11px; color:var(--text-dim); margin-top:14px; line-height:1.5; }
+  .close-x{ position:absolute; top:14px; right:16px; background:none; border:none; color:var(--text-dim); font-size:18px; cursor:pointer; }
+
+  /* Focus ring overlay */
+  .focus-overlay{
+    position:fixed; inset:0; background:rgba(11,11,13,.92); z-index:90;
+    display:none; align-items:center; justify-content:center; flex-direction:column;
+  }
+  .focus-overlay.open{ display:flex; }
+  .focus-title{ color:var(--text-bright); font-size:16px; letter-spacing:.05em; margin-bottom:2px; text-transform:uppercase;}
+  .focus-sub{ color:var(--text-dim); font-size:12px; margin-bottom:20px; }
+  .focus-stage{ width:min(70vw, 70vh, 460px); height:min(70vw, 70vh, 460px); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button>
+  <button class="iconbtn" id="addBlockBtn" aria-label="Add block">＋</button>
+</div>
+
+<div class="stage" id="stage">
+  <svg id="disc" viewBox="0 0 400 400" role="img" aria-label="Day Pie disc">
+    <defs>
+      <radialGradient id="remainGrad" cx="50%" cy="50%" r="65%">
+        <stop offset="0%" stop-color="#241d12"/>
+        <stop offset="100%" stop-color="#3a2e18"/>
+      </radialGradient>
+      <radialGradient id="winddownGrad" cx="50%" cy="50%" r="65%">
+        <stop offset="0%" stop-color="#3a2010"/>
+        <stop offset="100%" stop-color="#5a3418"/>
+      </radialGradient>
+      <radialGradient id="bloomGrad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#F26419" stop-opacity=".9"/>
+        <stop offset="100%" stop-color="#F26419" stop-opacity="0"/>
+      </radialGradient>
+      <filter id="nowGlow" x="-200%" y="-200%" width="500%" height="500%">
+        <feGaussianBlur stdDeviation="3" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    <g id="ticksGroup"></g>
+    <path id="goldenHourArc" class="sector-goldenhour" style="display:none"></path>
+    <path id="remainingSector" class="sector-remaining"></path>
+    <path id="winddownSector" class="sector-winddown" style="display:none"></path>
+    <path id="elapsedSector" class="sector-elapsed"></path>
+    <g id="blocksGroup"></g>
+    <line id="nowLine" class="now-line" x1="200" y1="200" x2="200" y2="20"/>
+    <circle id="nowDot" class="now-dot" cx="200" cy="200" r="3.5"/>
+    <circle id="sunriseBloom" class="sunrise-bloom" cx="200" cy="200" r="190"/>
+  </svg>
+
+  <div class="readouts">
+    <div class="remaining-hours" id="remainingHours">--</div>
+    <div class="remaining-label">hours actually free</div>
+    <div class="current-time" id="currentTime">--:--</div>
+    <div class="next-up" id="nextUp">&nbsp;</div>
+  </div>
+</div>
+
+<div class="modebar">
+  <button class="modebtn" data-mode="glance">Glance</button>
+  <button class="modebtn" data-mode="ambient">Ambient</button>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal">
+    <button class="close-x" data-close>&times;</button>
+    <h2>Settings</h2>
+    <div class="row2">
+      <div class="field">
+        <label>Wake</label>
+        <input type="time" id="wakeInput">
+      </div>
+      <div class="field">
+        <label>Sleep</label>
+        <input type="time" id="sleepInput">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Latitude (golden hour)</label>
+        <input type="number" step="0.0001" id="latInput" placeholder="e.g. 40.7128">
+      </div>
+      <div class="field">
+        <label>Longitude</label>
+        <input type="number" step="0.0001" id="lonInput" placeholder="e.g. -74.0060">
+      </div>
+    </div>
+    <div class="btnrow">
+      <button class="primary" id="saveSettingsBtn">Save</button>
+    </div>
+    <div class="blocklist" id="settingsBlockList"></div>
+    <div class="hint">The disc shows only your waking day. Golden hour requires coordinates and network access to Open-Meteo (cached per day).</div>
+  </div>
+</div>
+
+<!-- Block Edit Modal -->
+<div class="modal-backdrop" id="blockModal">
+  <div class="modal">
+    <button class="close-x" data-close>&times;</button>
+    <h2 id="blockModalTitle">New Block</h2>
+    <div class="field">
+      <label>Label</label>
+      <input type="text" id="blockLabel" placeholder="Deep work">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Start</label>
+        <input type="time" id="blockStart">
+      </div>
+      <div class="field">
+        <label>End</label>
+        <input type="time" id="blockEnd">
+      </div>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <div class="colorpick" id="categoryPick">
+        <label><input type="radio" name="cat" value="work" checked><span class="swatch" style="background:#F26419"></span>work</label>
+        <label><input type="radio" name="cat" value="training"><span class="swatch" style="background:#9E2B25"></span>training</label>
+        <label><input type="radio" name="cat" value="life"><span class="swatch" style="background:#7C8591"></span>life</label>
+        <label><input type="radio" name="cat" value="rest"><span class="swatch" style="background:#1F2A44"></span>rest</label>
+      </div>
+    </div>
+    <div class="field">
+      <label>Repeat</label>
+      <select id="blockRepeat">
+        <option value="none">Just today</option>
+        <option value="daily">Daily</option>
+        <option value="weekdays">Weekdays</option>
+      </select>
+    </div>
+    <div class="btnrow">
+      <button class="danger" id="deleteBlockBtn" style="display:none">Delete</button>
+      <button class="ghost" data-close>Cancel</button>
+      <button class="primary" id="saveBlockBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Focus mode overlay -->
+<div class="focus-overlay" id="focusOverlay">
+  <div class="focus-title" id="focusTitle">Block</div>
+  <div class="focus-sub" id="focusSub">--</div>
+  <svg class="focus-stage" viewBox="0 0 400 400">
+    <defs>
+      <filter id="nowGlow2" x="-200%" y="-200%" width="500%" height="500%">
+        <feGaussianBlur stdDeviation="3" result="blur"/>
+        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <circle cx="200" cy="200" r="190" fill="none" stroke="#2a2a2e" stroke-width="1"/>
+    <path id="focusElapsed" fill="#17171a"></path>
+    <path id="focusRemaining" fill="#241d12"></path>
+    <line id="focusNowLine" x1="200" y1="200" x2="200" y2="20" stroke="#F26419" stroke-width="2.5" filter="url(#nowGlow2)" stroke-linecap="round"/>
+  </svg>
+  <button class="modebtn" id="focusCloseBtn" style="margin-top:22px;">Back to Glance</button>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const CATEGORY_COLORS = { work:'#F26419', training:'#9E2B25', life:'#7C8591', rest:'#1F2A44' };
+  const CX=200, CY=200, R=190;
+  const BLOCK_R_OUTER=190, BLOCK_R_INNER=150;
+  const TICK_R_IN=190, TICK_R_OUT=200;
+
+  const STORE_KEYS = { settings:'daypie_settings', blocks:'daypie_blocks', sunset:'daypie_sunset', sunriseFlag:'daypie_sunrise_shown' };
+
+  // ---------- persistence ----------
+  function loadSettings(){
+    try{
+      const raw = localStorage.getItem(STORE_KEYS.settings);
+      if(raw) return Object.assign({wake:'07:00', sleep:'23:00', lat:null, lon:null}, JSON.parse(raw));
+    }catch(e){}
+    return {wake:'07:00', sleep:'23:00', lat:null, lon:null};
+  }
+  function saveSettings(s){ localStorage.setItem(STORE_KEYS.settings, JSON.stringify(s)); }
+
+  function loadBlocks(){
+    try{
+      const raw = localStorage.getItem(STORE_KEYS.blocks);
+      if(raw) return JSON.parse(raw);
+    }catch(e){}
+    return [];
+  }
+  function saveBlocks(b){ localStorage.setItem(STORE_KEYS.blocks, JSON.stringify(b)); }
+
+  let settings = loadSettings();
+  let blocks = loadBlocks();
+
+  // ---------- time helpers ----------
+  function toMinutes(hhmm){
+    const [h,m] = hhmm.split(':').map(Number);
+    return h*60+m;
+  }
+  function nowMinutes(){
+    const d = new Date();
+    return d.getHours()*60 + d.getMinutes() + d.getSeconds()/60;
+  }
+  function todayKey(){
+    const d = new Date();
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  function fmtHM(mins){
+    mins = Math.max(0, Math.round(mins));
+    const h = Math.floor(mins/60), m = mins%60;
+    if(h<=0) return m+'m';
+    if(m===0) return h+'h';
+    return h+'h '+m+'m';
+  }
+  function fmtClock(mins){
+    let h = Math.floor(mins/60)%24, m = Math.floor(mins%60);
+    const ap = h>=12 ? 'pm':'am';
+    let h12 = h%12; if(h12===0) h12=12;
+    return h12+':'+String(m).padStart(2,'0')+ap;
+  }
+
+  // ---------- geometry ----------
+  // fraction 0..1 across the waking day -> point on circle, starting at top, clockwise
+  function pointFor(fraction, radius){
+    const angle = (fraction*360 - 90) * Math.PI/180;
+    return { x: CX + radius*Math.cos(angle), y: CY + radius*Math.sin(angle) };
+  }
+  function fracToAngleDeg(fraction){ return fraction*360 - 90; }
+
+  // pie slice path from center between fractions f0..f1 (f0<f1), radius r
+  function pieSlicePath(f0, f1, r){
+    if(f1 <= f0) return '';
+    f1 = Math.min(f1, f0+0.999999);
+    const p0 = pointFor(f0, r), p1 = pointFor(f1, r);
+    const large = (f1-f0) > 0.5 ? 1 : 0;
+    return `M ${CX},${CY} L ${p0.x.toFixed(2)},${p0.y.toFixed(2)} A ${r},${r} 0 ${large} 1 ${p1.x.toFixed(2)},${p1.y.toFixed(2)} Z`;
+  }
+  // annulus band path between fractions, radius rIn..rOut
+  function bandPath(f0, f1, rIn, rOut){
+    if(f1 <= f0) return '';
+    f1 = Math.min(f1, f0+0.999999);
+    const large = (f1-f0) > 0.5 ? 1 : 0;
+    const o0 = pointFor(f0, rOut), o1 = pointFor(f1, rOut);
+    const i1 = pointFor(f1, rIn), i0 = pointFor(f0, rIn);
+    return `M ${o0.x.toFixed(2)},${o0.y.toFixed(2)} A ${rOut},${rOut} 0 ${large} 1 ${o1.x.toFixed(2)},${o1.y.toFixed(2)} L ${i1.x.toFixed(2)},${i1.y.toFixed(2)} A ${rIn},${rIn} 0 ${large} 0 ${i0.x.toFixed(2)},${i0.y.toFixed(2)} Z`;
+  }
+
+  // ---------- block materialization ----------
+  function weekday(){ return new Date().getDay(); } // 0 Sun .. 6 Sat
+  function isActiveToday(b){
+    if(b.repeat === 'daily') return true;
+    if(b.repeat === 'weekdays'){ const w = weekday(); return w>=1 && w<=5; }
+    return b.date === todayKey();
+  }
+  function todaysBlocks(){
+    return blocks.filter(isActiveToday).slice().sort((a,b)=>toMinutes(a.start)-toMinutes(b.start));
+  }
+
+  // ---------- ticks (drawn once per settings change) ----------
+  function drawTicks(){
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep);
+    const total = sleep - wake;
+    const g = document.getElementById('ticksGroup');
+    g.innerHTML = '';
+    const hours = Math.floor(total/60);
+    for(let i=0;i<=hours;i++){
+      const frac = (i*60)/total;
+      if(frac>1) continue;
+      const isMajor = i % 3 === 0;
+      const p1 = pointFor(frac, TICK_R_IN);
+      const p2 = pointFor(frac, isMajor ? TICK_R_OUT+4 : TICK_R_OUT);
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+      line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+      line.setAttribute('class', 'tick' + (isMajor ? ' major':''));
+      g.appendChild(line);
+    }
+  }
+
+  // ---------- golden hour ----------
+  function updateGoldenHour(){
+    const el = document.getElementById('goldenHourArc');
+    if(!settings.lat || !settings.lon){ el.style.display='none'; return; }
+    const key = todayKey();
+    let cache = {};
+    try{ cache = JSON.parse(localStorage.getItem(STORE_KEYS.sunset) || '{}'); }catch(e){}
+    if(cache.date === key && cache.lat===settings.lat && cache.lon===settings.lon){
+      renderGoldenHour(cache.sunset);
+    } else {
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${settings.lat}&longitude=${settings.lon}&daily=sunset&timezone=auto`)
+        .then(r=>r.json())
+        .then(data=>{
+          const sunsetIso = data && data.daily && data.daily.sunset && data.daily.sunset[0];
+          if(!sunsetIso) return;
+          const d = new Date(sunsetIso);
+          const mins = d.getHours()*60 + d.getMinutes();
+          localStorage.setItem(STORE_KEYS.sunset, JSON.stringify({date:key, lat:settings.lat, lon:settings.lon, sunset:mins}));
+          renderGoldenHour(mins);
+        }).catch(()=>{ el.style.display='none'; });
+    }
+  }
+  function renderGoldenHour(sunsetMins){
+    const el = document.getElementById('goldenHourArc');
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep);
+    const total = sleep - wake;
+    const start = sunsetMins - 30, end = sunsetMins + 30;
+    if(end < wake || start > sleep){ el.style.display='none'; return; }
+    const f0 = Math.max(0, (start-wake)/total), f1 = Math.min(1, (end-wake)/total);
+    el.setAttribute('d', bandPath(f0, f1, R-14, R));
+    el.style.display='block';
+  }
+
+  // ---------- main render ----------
+  let sunriseShownDate = localStorage.getItem(STORE_KEYS.sunriseFlag);
+
+  function render(){
+    const wake = toMinutes(settings.wake), sleep = toMinutes(settings.sleep);
+    const total = sleep - wake;
+    const now = nowMinutes();
+    const fracNow = Math.min(1, Math.max(0, (now - wake) / total));
+    const windDownStart = sleep - 90;
+    const inWindDown = now >= windDownStart && now < sleep;
+
+    // elapsed / remaining sectors
+    document.getElementById('elapsedSector').setAttribute('d', pieSlicePath(0, fracNow, R));
+
+    if(inWindDown){
+      const fWD0 = Math.max(fracNow, (windDownStart-wake)/total);
+      document.getElementById('remainingSector').setAttribute('d', pieSlicePath(fracNow, fWD0, R));
+      document.getElementById('winddownSector').setAttribute('d', pieSlicePath(fWD0, 1, R));
+      document.getElementById('winddownSector').style.display = 'block';
+    } else {
+      const fWD0 = Math.max(fracNow, (windDownStart-wake)/total);
+      document.getElementById('remainingSector').setAttribute('d', pieSlicePath(fracNow, fWD0, R));
+      if(fWD0 < 1){
+        document.getElementById('winddownSector').setAttribute('d', pieSlicePath(fWD0, 1, R));
+        document.getElementById('winddownSector').style.display = 'block';
+      } else {
+        document.getElementById('winddownSector').style.display = 'none';
+      }
+    }
+
+    // now line
+    const p = pointFor(fracNow, R);
+    const line = document.getElementById('nowLine');
+    if(now < wake || now > sleep){
+      line.style.display = 'none';
+      document.getElementById('nowDot').style.display = 'none';
+    } else {
+      line.style.display = 'block';
+      document.getElementById('nowDot').style.display = 'block';
+      line.setAttribute('x2', p.x); line.setAttribute('y2', p.y);
+      document.getElementById('nowDot').setAttribute('cx', p.x);
+      document.getElementById('nowDot').setAttribute('cy', p.y);
+    }
+
+    // blocks
+    renderBlocks(wake, sleep, total, now);
+
+    // readouts
+    let committedRemaining = 0;
+    const tb = todaysBlocks();
+    let nextBlock = null, nextDelta = Infinity;
+    tb.forEach(b=>{
+      const bs = toMinutes(b.start), be = toMinutes(b.end);
+      const effStart = Math.max(bs, now), effEnd = Math.min(be, sleep);
+      if(effEnd > effStart) committedRemaining += (effEnd-effStart);
+      if(bs > now && (bs-now) < nextDelta){ nextDelta = bs-now; nextBlock = b; }
+    });
+    const rawRemaining = Math.max(0, sleep - now);
+    const usable = Math.max(0, rawRemaining - committedRemaining);
+    document.getElementById('remainingHours').textContent = (now < wake) ? '--' : (usable/60).toFixed(1);
+    document.getElementById('currentTime').textContent = fmtClock(now);
+    document.getElementById('nextUp').textContent = nextBlock
+      ? `next up: ${nextBlock.label} in ${fmtHM(nextDelta)}`
+      : (now>sleep ? 'day complete' : ' ');
+
+    // sunrise bloom (once per day, within first 8 min after wake)
+    const bloom = document.getElementById('sunriseBloom');
+    if(now >= wake && now < wake+8 && sunriseShownDate !== todayKey()){
+      bloom.classList.remove('play');
+      void bloom.offsetWidth;
+      bloom.classList.add('play');
+      sunriseShownDate = todayKey();
+      localStorage.setItem(STORE_KEYS.sunriseFlag, sunriseShownDate);
+    }
+  }
+
+  function renderBlocks(wake, sleep, total, now){
+    const g = document.getElementById('blocksGroup');
+    g.innerHTML = '';
+    todaysBlocks().forEach(b=>{
+      const bs = toMinutes(b.start), be = toMinutes(b.end);
+      const f0 = Math.max(0, Math.min(1, (bs-wake)/total));
+      const f1 = Math.max(0, Math.min(1, (be-wake)/total));
+      if(f1 <= f0) return;
+      const isElapsed = be <= now;
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d', bandPath(f0, f1, BLOCK_R_INNER, BLOCK_R_OUTER));
+      path.setAttribute('class', 'block-arc' + (isElapsed ? ' elapsed':''));
+      const color = CATEGORY_COLORS[b.category] || CATEGORY_COLORS.life;
+      if(isElapsed){
+        path.setAttribute('fill','none');
+        path.setAttribute('stroke', color);
+      } else {
+        path.setAttribute('fill', color);
+        path.setAttribute('fill-opacity', '0.55');
+      }
+      path.dataset.id = b.id;
+      path.addEventListener('click', ()=> openBlockModal(b));
+      g.appendChild(path);
+
+      // label along mid-arc
+      const midF = (f0+f1)/2;
+      const lp = pointFor(midF, (BLOCK_R_INNER+BLOCK_R_OUTER)/2 + 14);
+      const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('x', lp.x); label.setAttribute('y', lp.y);
+      label.setAttribute('text-anchor','middle');
+      label.setAttribute('class','block-label');
+      label.textContent = b.label;
+      g.appendChild(label);
+    });
+  }
+
+  // ---------- modals: settings ----------
+  const settingsModal = document.getElementById('settingsModal');
+  document.getElementById('settingsBtn').addEventListener('click', ()=>{
+    document.getElementById('wakeInput').value = settings.wake;
+    document.getElementById('sleepInput').value = settings.sleep;
+    document.getElementById('latInput').value = settings.lat || '';
+    document.getElementById('lonInput').value = settings.lon || '';
+    renderSettingsBlockList();
+    settingsModal.classList.add('open');
+  });
+  function renderSettingsBlockList(){
+    const list = document.getElementById('settingsBlockList');
+    list.innerHTML = '<div class="hint" style="margin-top:0">Blocks</div>';
+    blocks.slice().sort((a,b)=>toMinutes(a.start)-toMinutes(b.start)).forEach(b=>{
+      const row = document.createElement('div');
+      row.className='blockitem';
+      row.innerHTML = `<span><span class="dot" style="background:${CATEGORY_COLORS[b.category]||'#888'}"></span>${b.label} · ${b.start}–${b.end} · ${b.repeat}</span>`;
+      row.addEventListener('click', ()=>{ settingsModal.classList.remove('open'); openBlockModal(b); });
+      list.appendChild(row);
+    });
+  }
+  document.getElementById('saveSettingsBtn').addEventListener('click', ()=>{
+    const w = document.getElementById('wakeInput').value || '07:00';
+    const s = document.getElementById('sleepInput').value || '23:00';
+    if(toMinutes(s) <= toMinutes(w)){ alert('Sleep time must be after wake time.'); return; }
+    settings.wake = w; settings.sleep = s;
+    const lat = parseFloat(document.getElementById('latInput').value);
+    const lon = parseFloat(document.getElementById('lonInput').value);
+    settings.lat = isNaN(lat) ? null : lat;
+    settings.lon = isNaN(lon) ? null : lon;
+    saveSettings(settings);
+    drawTicks();
+    updateGoldenHour();
+    render();
+    settingsModal.classList.remove('open');
+  });
+
+  // ---------- modals: block edit ----------
+  const blockModal = document.getElementById('blockModal');
+  let editingBlockId = null;
+  function openBlockModal(existing){
+    editingBlockId = existing ? existing.id : null;
+    document.getElementById('blockModalTitle').textContent = existing ? 'Edit Block' : 'New Block';
+    document.getElementById('blockLabel').value = existing ? existing.label : '';
+    document.getElementById('blockStart').value = existing ? existing.start : roundedNow();
+    document.getElementById('blockEnd').value = existing ? existing.end : addMinutes(roundedNow(), 60);
+    document.getElementById('blockRepeat').value = existing ? existing.repeat : 'none';
+    const cat = existing ? existing.category : 'work';
+    document.querySelectorAll('#categoryPick input').forEach(r=> r.checked = (r.value === cat));
+    document.getElementById('deleteBlockBtn').style.display = existing ? 'block' : 'none';
+    blockModal.classList.add('open');
+  }
+  function roundedNow(){
+    const d = new Date(); let m = d.getMinutes();
+    m = Math.round(m/15)*15;
+    let h = d.getHours();
+    if(m===60){ m=0; h=(h+1)%24; }
+    return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+  }
+  function addMinutes(hhmm, add){
+    let mins = toMinutes(hhmm)+add;
+    mins = ((mins%1440)+1440)%1440;
+    return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
+  }
+  document.getElementById('addBlockBtn').addEventListener('click', ()=> openBlockModal(null));
+  document.getElementById('saveBlockBtn').addEventListener('click', ()=>{
+    const label = document.getElementById('blockLabel').value.trim() || 'Untitled';
+    const start = document.getElementById('blockStart').value;
+    const end = document.getElementById('blockEnd').value;
+    if(!start || !end || toMinutes(end) <= toMinutes(start)){ alert('End must be after start.'); return; }
+    const category = document.querySelector('#categoryPick input:checked').value;
+    const repeat = document.getElementById('blockRepeat').value;
+    if(editingBlockId){
+      const b = blocks.find(x=>x.id===editingBlockId);
+      Object.assign(b, {label, start, end, category, repeat, date: repeat==='none' ? todayKey() : b.date});
+    } else {
+      blocks.push({ id: 'b'+Date.now()+Math.random().toString(36).slice(2,7), label, start, end, category, repeat, date: todayKey() });
+    }
+    saveBlocks(blocks);
+    blockModal.classList.remove('open');
+    render();
+  });
+  document.getElementById('deleteBlockBtn').addEventListener('click', ()=>{
+    blocks = blocks.filter(b=>b.id!==editingBlockId);
+    saveBlocks(blocks);
+    blockModal.classList.remove('open');
+    render();
+  });
+
+  document.querySelectorAll('[data-close]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      settingsModal.classList.remove('open');
+      blockModal.classList.remove('open');
+    });
+  });
+  [settingsModal, blockModal].forEach(m=>{
+    m.addEventListener('click', (e)=>{ if(e.target===m) m.classList.remove('open'); });
+  });
+
+  // ---------- modes ----------
+  function setMode(mode){
+    document.body.classList.toggle('ambient', mode==='ambient');
+    document.querySelectorAll('.modebtn[data-mode]').forEach(b=>{
+      b.classList.toggle('active', b.dataset.mode===mode);
+    });
+  }
+  document.querySelectorAll('.modebtn[data-mode]').forEach(btn=>{
+    btn.addEventListener('click', ()=> setMode(btn.dataset.mode));
+  });
+  setMode('glance');
+
+  // ---------- focus mode ----------
+  const focusOverlay = document.getElementById('focusOverlay');
+  function openFocus(block){
+    const bs = toMinutes(block.start), be = toMinutes(block.end);
+    const now = nowMinutes();
+    const total = be - bs;
+    const frac = Math.min(1, Math.max(0, (now-bs)/total));
+    document.getElementById('focusTitle').textContent = block.label;
+    document.getElementById('focusSub').textContent = `${block.start}–${block.end}`;
+    document.getElementById('focusElapsed').setAttribute('d', pieSlicePath(0, frac, 190));
+    document.getElementById('focusRemaining').setAttribute('d', pieSlicePath(frac, 1, 190));
+    const p = (function(){ const a=(frac*360-90)*Math.PI/180; return {x:200+190*Math.cos(a), y:200+190*Math.sin(a)}; })();
+    const fl = document.getElementById('focusNowLine');
+    fl.setAttribute('x2', p.x); fl.setAttribute('y2', p.y);
+    focusOverlay.classList.add('open');
+    focusOverlay._block = block;
+  }
+  document.getElementById('focusCloseBtn').addEventListener('click', ()=> focusOverlay.classList.remove('open'));
+
+  // long-press current block to enter focus mode
+  let pressTimer = null;
+  document.getElementById('blocksGroup').addEventListener('pointerdown', (e)=>{
+    const id = e.target.dataset && e.target.dataset.id;
+    if(!id) return;
+    const block = blocks.find(b=>b.id===id);
+    if(!block) return;
+    const now = nowMinutes();
+    const isCurrent = toMinutes(block.start) <= now && now < toMinutes(block.end);
+    if(!isCurrent) return;
+    pressTimer = setTimeout(()=> openFocus(block), 480);
+  });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>{
+    document.getElementById('blocksGroup').addEventListener(ev, ()=>{ clearTimeout(pressTimer); });
+  });
+
+  // ---------- boot ----------
+  function boot(){
+    drawTicks();
+    updateGoldenHour();
+    render();
+    setInterval(render, 30000);
+  }
+  boot();
+
+  // ---------- service worker ----------
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('sw.js').catch(()=>{});
+    });
+  }
+})();
+</script>
+</body>
+</html>
